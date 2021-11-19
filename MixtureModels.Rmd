@@ -1,0 +1,246 @@
+---
+title: "Mixture models"
+#author: "Nir Schwartz"
+date: "11-18/10/2021"
+output: html_document
+---
+## Question 1 one-dimensional mixture of Gaussians
+
+1. Let us first simulate 1000 tosses of a coin $B\sim\mathrm{Bin}(\pi)$ with $\pi=\frac 13$. Based on the results in each trial we pick a sequence of random variables $\{X_j\}_{j=1}^{1000}$ each distributed like one of the two fixed 1D Gaussians $\mathcal{N}(\mu_k,\sigma_k)$  with $k\in\{1,2\},\mu_1=0,\sigma_1=1$ and $\mu_2=4,\sigma_2=\frac 12.$ 
+```{r}
+library(ggplot2)
+library(latex2exp)
+set.seed(42)
+pi <- 1/3
+N <- 1000
+mu1 <- 0
+std1 <- 1
+mu2 <- 4
+std2 <- 1/2
+# Toss the coin N times
+coin <- sample(c(1,0), size=N, replace=TRUE, prob=c(pi,1-pi))
+# Create the two normal distributions
+gauss_1 <- rnorm(n=N, mean=mu1, sd=std1)
+gauss_2 <- rnorm(n=N, mean=mu2, sd=std2)
+# Mix between them based on the result of the coin
+mixture_gaussians <- data.frame(x = ifelse(coin, gauss_1, gauss_2))
+eqn <- "$X|B$"
+
+rescaled_dnorm <- function(mean, sd, n, binwidth) {
+      stat_function(
+        fun = function(x) {
+          (dnorm(x, mean = mean, sd = sd)) #* binwidth * n
+        }
+      ) }
+ggplot(mixture_gaussians) +
+  geom_histogram(aes(x = x, ..density..), binwidth = 0.05) +
+  mapply(rescaled_dnorm,
+    mean = mu1, #first mean
+    sd = std1, 
+    n = N, #sample size
+    binwidth = 0.05 #binwidth used for histogram
+  ) +
+  mapply(rescaled_dnorm,
+    mean =  mu2, #first mean
+    sd = std2, 
+    n = N, #sample size
+    binwidth = 0.05 #binwidth used for histogram
+  ) +
+  annotate("text", x=5, y=0.5, label=TeX(eqn, output="character"),
+           hjust=0, size = 4, parse = TRUE)
+```
+
+2. Let us now use `kemans` to find two clusters.
+```{r}
+set.seed(42)
+res <- kmeans(mixture_gaussians, 2, nstart=1000)
+str(res)
+```
+
+3. From this output we understand that according to `kemans` if one wants to divide the data to two clusters, they are centered around $\mu_1=3.9917$ and $\mu_2=-0.0843$,
+```{r}
+kmeans_clusters = paste(c(res$cluster))
+list_observations = c(mixture_gaussians)
+df <- data.frame(Cluster=kmeans_clusters, Observation=list_observations)
+ggplot(df, aes(x = x, ..density.., color=Cluster, fill=Cluster)) +
+  geom_histogram(position="identity", binwidth=0.05) + 
+  xlim(-2,6) +
+  scale_color_brewer(palette="Dark2") +
+  scale_fill_brewer(palette="Dark2")
+```
+
+This is really not so bad but you can verify it would fail tremendously had we picked our observations to be distributed according to mixture of other distributions (try!). Overall it's a good lesson to life -- don't ever overload algorithms without testing their assumptions. As our data is 1 dimensional it's not a "real" clustering problem but rather segmentation or natural breaks optimization (as in https://en.wikipedia.org/wiki/Jenks_natural_breaks_optimization). In order to "overcome" the "normality" assumption we turn now to `Mclust` which performs very well on 1D data (see the figures below) and does not make assumptions on the distribution of the data.
+
+4. Let us try the `Mclust` approach using two **1D** models. First one: when the variance of the segments is equal (thus `modelNames="E"` stands for `Equal`) and then when it can vary (`modelNames="V"` for `Varied variances`). 
+```{r}
+library(mclust)
+modelE <- Mclust(mixture_gaussians,G=2, modelNames = "E")
+modelV <- Mclust(mixture_gaussians,G=2, modelNames = "V")
+```
+Here I forced Mclust to use 2 clusters **but** if you remove this, by default it will test all possibilities from 1 up to 9 clusters (Check what happens if we don't ask from `Mclust` exactly two clusters).
+Let's analyse the results:
+First the equivariant model,
+```{r}
+summary(modelE, parameters = TRUE)
+```
+Indeed the variances are same ($\sigma_1=\sigma_2$), $\pi$ is a almost there with $\pi=0.316$, and the means are close to $\mu_j$ defined above. 
+
+About the second,
+```{r}
+summary(modelV,G=2, parameters = TRUE)
+```
+
+This time the distance between $\pi$ and its approximation  is a bit bigger (0.03 vs. 0.01) but in general we get similar result, the means are more far from each other. The variances this time were allowed to be far from each other and indeed one of them approaches the correct value we try to estimate. The second, $\sigma_2=0.243$ is not quite exact but such a result is better from our `E` model which gave errors of +0.25 and -0.25 respectively from the initial variances. 
+
+Let us plot everything all together. First for the equi-model,
+
+```{r}
+clusterE = paste(c(modelE$classification))
+meansE <- modelE$parameters$mean
+stdE <- modelE$parameters$variance$sigmasq
+piE <- modelE$parameters$pro
+list_observations = c(mixture_gaussians)
+df <- data.frame(Cluster=clusterE, Observation=list_observations)
+ggplot(df) +
+  geom_histogram(aes(x = x,..density.., color=Cluster, fill=Cluster),binwidth=0.05) +
+mapply(rescaled_dnorm,
+    mean =  meansE[1], #first mean
+    sd = sqrt(stdE), 
+    n = N, 
+    binwidth = 0.05 
+  ) +
+    mapply(rescaled_dnorm,
+    mean =  meansE[2], #second mean
+    sd = sqrt(stdE), 
+    n = N, 
+    binwidth = 0.05 
+  ) 
+```
+
+Then for the varied model,
+```{r}
+meansV <- modelV$parameters$mean
+stdV <- modelV$parameters$variance$sigmasq
+piV <- modelV$parameters$pro[1]
+clusterV = paste(c(modelV$classification))
+list_observations = c(mixture_gaussians)
+df <- data.frame(Cluster=clusterV, Observation=list_observations)
+ggplot(df) +
+  geom_histogram(aes(x = x, ..density.., color=Cluster, fill=Cluster) ,position="identity", binwidth=0.05) + 
+  mapply(rescaled_dnorm,
+    mean =  meansV[1], #first mean
+    sd = sqrt(stdV[1]), 
+    n = N, 
+    binwidth = 0.05 
+  ) +
+    mapply(rescaled_dnorm,
+    mean =  meansV[2], #second mean
+    sd = sqrt(stdV[2]), 
+    n = N, 
+    binwidth = 0.05 
+  ) +
+  scale_color_manual(values=c("#999999", "#E69F00", "#56B4E9")) +
+  scale_fill_manual(values=c("#999999", "#E69F00", "#56B4E9")) 
+```
+
+What did you learn?
+
+
+## Question 2 bi-dimensional mixture model
+
+
+In this question we will consider the dataset `Faithful` describing \begin{quote} the waiting time between eruptions and the duration of the eruption for the Old Faithful geyser in Yellowstone National Park, Wyoming, USA. \end{quote}. Let us first load the data and plot it "as is", without any analysis performed. 
+
+```{r setup, include=TRUE}
+library(mclust)
+library(ggplot2)
+data(faithful)
+ggplot(faithful, aes(x=eruptions,y=waiting)) + geom_point(size=2, shape=17)
+```
+
+
+## Part 1: Mclust
+Now let us run `Mclust` using the EM algorithm to analyse the clustering in our data.
+Then let us add some useful about it. Use `paramters=TRUE` to see the entire analysis
+
+```{r}
+faithful_model <- Mclust(faithful)
+summary(faithful_model, parameters=TRUE)
+```
+
+We can now create 4 plots based on the output of our `Mclust` analysis
+
+```{r}
+par(mfrow=c(2, 2)) # Make it a grid of 2x2 small figures
+plot(faithful_model)
+```
+
+Let us comment on each of these figures:
+
+1. Number of components and the associated Bayesian Information criterion. We need to understand which model to select between those offered by Mclust. The model chosen is of ellipsoid clusters.
+
+2. Figure of clusters with centers.  There are 3 clusters (RGB) each centered at the position marked by the star.
+
+3. The uncertainty figure -- how much the algorithm is certain about the classification of the point to the chosen cluster  
+
+4. The log-density contour plot  -- the model selected is multi-normal with "peaks" at the selected level sets.
+
+## PArt 2: Hirarchical clustering
+Let's get down to the hierarchical clustering business:
+
+First we should import some packages
+```{r}
+library(factoextra) # for beautiful figures in the end
+```
+
+We then calculate the Euclidean distances and used the command `hclust` with Ward's criterion to create the hierarchical clustering model.
+```{r}
+df <- faithful
+differences <- dist(df, method="euclidean")
+hcl <- hclust(differences, method = "ward.D2") # Recall: ward.D vs. ward.D2 are two distances used in Ward's paper but canonically ward criterion is D2.
+# Or if you wish to be more sophisticated and smoke the pipe from our first class
+```
+
+For having two clusters and the corresponding cuts in the dendogram we type
+
+```{r}
+plot(hcl, cex=0.9, hang=-1)
+rect.hclust(hcl, k=2, border=1:3)
+```
+
+As much as we love trees, we would like to see this classification on the data itself "de facto":
+
+```{r}
+library(factoextra)
+sub_grp2 <- cutree(hcl, k=2)
+fviz_cluster(list(data = df, cluster = sub_grp2))
+```
+
+Let us now repeat the process for 3 clusters (recall:  `Mcluster` had identified a model with 3 ellipsoids = 3 clusters so this model should/might fit better to our data)
+
+To diversify we use the package `dendextend` to show you another possibility of visualization,
+
+```{r}
+#plot(hcl, cex=0.9, hang=-1)
+#rect.hclust(hcl, k=3, border=1:4) # previously
+suppressPackageStartupMessages(library(dendextend))
+ward.D2_dend_obj <- as.dendrogram(hcl)
+ward.D2_col_dend <- color_branches(ward.D2_dend_obj, k = 3)
+plot(ward.D2_col_dend)
+```
+
+As before we visualize this selection on the data itself,
+
+```{r}
+sub_grp3 <- cutree(hcl, k=3)
+fviz_cluster(list(data = df, cluster = sub_grp3))
+```
+
+or if you wish to get back to the same figure from which we have begun,
+```{r}
+sub_grp3 <- cutree(hcl, k=3)
+ggplot(df, aes(x=`eruptions`, y = `waiting`, color = factor(sub_grp3))) + 
+  geom_point(size=2, shape=17)
+```
+
+Discuss in teams: what is better? Which one would you use in real-life case?

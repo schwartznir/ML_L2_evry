@@ -1,0 +1,802 @@
+---
+title: "Few examples of principal component analysis"
+author: "Christophe Ambroise and Nir Schwartz"
+date: '08+15/11/2021'
+output: pdf_document
+urlcolor: green
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Solution 1 -- Introduction to PCA
+
+Let us write a function implementing PCA and verify its output against `prcomp`. Then we give an explicit example below with some data explaining this code line by line. 
+
+## Coding PCA
+
+To make things interesting we will use eigen-decomposition in our naïve code. However you should realize `PCA` from `factomineR` and the other function we ask you to compare it for both use SVD. For the relation between the two approaches look at the first answer given in https://stats.stackexchange.com/questions/134282/relationship-between-svd-and-pca-how-to-use-svd-to-perform-pca
+
+```{r}
+library(tidyverse)
+my_naive_pca <- function(data, comps=5)
+{
+  # normalize the data to have mean  0
+  scaled_data = scale(data, center=TRUE, scale=FALSE)
+  # covariance time
+  n<-nrow(scaled_data)
+  p<-ncol(scaled_data)
+  S<-var(scaled_data)*(n-1)/n
+  # svd -- nobody knows if we're considering rectangular or square data
+  scaled_eigen = eigen(S)
+  evals = scaled_eigen$values
+  # let's understand how many columns should our rotation matrix include
+  eigspaces_dims <- as.data.frame(table(evals))
+  col_rotmat <- 0
+  comps_no = min(comps, p)
+  for (idx in seq(p, p - comps_no + 1, by=-1))
+  {
+    col_rotmat <- col_rotmat + eigenspaces_dims[idx, 2]
+  }
+  # Self-explanatory
+  all_comps <- X %*% scaled_eigen$vectors
+  orthomat <- scaled_eigen$vectors[,1:col_rotmat]
+  pc_indiv <- all_comps[,1:col_rotmat]
+  
+  res <- list('indiv'=pc_indiv, 'rot' = orthomat, 'allcomps'=all_comps)
+  return(res)
+}
+```
+
+If you are a bit lazy/time-efficient, we can just use `PCA` from `FactoMineR`
+
+```{r}
+library("FactoMineR")
+facto_pca <- function(X){
+res.pca <- PCA(X, scale.unit = TRUE, graph = FALSE) # by default PCA gives 5 PCs.
+return(list('indiv'=res.pca$ind$coord, 'rot'=res.pca$var$coord, 'pca'=res.pca))
+}
+```
+
+## Anotated example -- gardes of 9 students
+
+Time to understand PCA with a numerical example. For the record we remind you the "explicit recipe", giving examples for the relevant parameters we use for the analysis (yes, in real life you can "just" use `PCA` from `factomineR` as before. No, it's important you know how thing work as otherwise you end up being coding monkeys doing "boulot-boulot-boulot"):
+
+First let's put some example data
+
+```{r}
+dataX <- read.table(text="
+    math  scie  fran  lati  d-m
+jean  6.0  6.0  5.0  5.5  8.0
+aline  8.0  8.0  8.0  8.0  9.0
+annie  6.0  7.0  11.0  9.5  11.0
+monique  14.5  14.5  15.5  15.0  8.0
+didier  14.0  14.0  12.0  12.5  10.0
+anré  11.0  10.0  5.5  7.0  13.0
+pierre  5.5  7.0  14.0  11.5  10.0
+brigitte  13.0  12.5  8.5  9.5  12.0
+evelyne  9.0  9.5  12.5  12.0  18.0
+", header=TRUE)
+# headers are not quantitative. Beware of averaging also "over your column titles".
+
+knitr::kable(dataX,format="latex", caption = "Notes de 9 élèves")
+```
+
+
+### Centerring the the dataset
+
+The means of the 5 variables are receptively $\mu_j = 9.67, 9.83, 10.22,
+10.05$ and  $11$. We remove from each column $C_j$ its mean $\mu_j$:
+
+```{r}
+X<- scale(dataX,center=TRUE,scale = FALSE)
+knitr::kable(X,format="latex", caption = "Centerred table",digits = 2)
+```
+
+
+### Covariance matrix
+Next let us compute the covariance matrix as well,
+
+$$\boldsymbol{S} = \frac{1}{9} \boldsymbol{X}'\boldsymbol{X}$$
+```{r}
+n<-nrow(X)
+p<-ncol(X)
+S<-var(X)*(n-1)/n
+knitr::kable(S,format="latex", caption = "Variance matrix",digits = 2)
+```
+
+
+## Principal axes of inertia
+
+Diagonalising the variance matrix yields the following eigenvalues (attention! `eigen()$values` gives the eigenvalues in descending order),
+$$\lambda_1=28.2533,  \lambda_2=12.0747, \lambda_3=8.6157, \lambda_4=0.0217, \lambda_5=0.0099.$$
+and the following normalized eigenvectors (a.k.a «principal axes of inertia»)
+
+$$\boldsymbol u_1=\left(\begin{array}{r}0.51\\0.51\\0.49\\0.48\\0.03\end{array}\right), 
+\boldsymbol u_2=\left(\begin{array}{r}-0.57\\-0.37\\0.65\\0.32\\0.11\end{array}\right),
+\boldsymbol u_3=\left(\begin{array}{r}-0.05\\-0.01\\0.11\\0.02\\-0.99\end{array}\right),
+\boldsymbol u_4=\left(\begin{array}{r}0.29\\-0.55\\-0.39\\0.67\\-0.03\end{array}\right),
+\boldsymbol u_5=\left(\begin{array}{r}-0.57\\0.55\\-0.41\\0.45\\-0.01\end{array}\right).$$
+
+
+
+## On the quality of representation using coroletions and $\cos^2$-score
+
+- the inertia of the clusters projected on the 5 axes are equal
+to eigenvalues.
+- the inertia of the clusters is equal to $\text{Tr}(S)$, i.e., also to the sum of the eigenvalues, here 48.975.
+- the inertia percentages explained by each axis are therefore 57.69, 24.65, 17.59, 0.04 and 0.02 rspectively.
+- The percentages of inertia explained by the eigensubspaces are 57.69, 82.34, 99.94, 99.98 and 100.00.
+- the initial cluster is practically in a subspace of dimension 3 (i.e., $W\subset\mathbb{R}^5$ such that $\dim W=3$).
+
+
+## Principal components $C=\boldsymbol X U$
+
+```{r}
+U<-eigen(S)$vectors ; Lambda<-eigen(S)$values ; C = X%*%U
+knitr::kable(C,format="latex", 
+             caption = "Principal components",digits = 2)
+```
+
+These principal components allows to obtain for instance the representation tables
+l,2 and 1,3 created by the following codes
+
+## The relative contributions of the axes to the individuals
+
+```{r}
+COR <- C^2 / rowSums(X^2) 
+knitr::kable(COR,format="latex", 
+             caption = "Relative Contribution of the axes to individuals",
+             digits = 2)
+```
+
+## Relative contributions of individuals to the axes
+
+```{r}
+CTR<- 1/n* C^2 /  matrix(eigen(S)$values,n,p,byrow = TRUE) 
+knitr::kable(CTR,format="latex", 
+             caption = "Relative contribution of individuals to the axes",
+             digits = 2)
+```
+
+## Analysis in $\mathbb R^n$
+
+The vectors $\boldsymbol d^{\alpha}$, the principal components associated to the various veiables,
+are formed by the coordinates of all the variables on the same axis $\boldsymbol v_\alpha$ and satisfy the relation
+$$\boldsymbol d^\alpha=\sqrt{\lambda_\alpha} \boldsymbol u_\alpha.$$ We obtain
+
+```{r}
+D<- U * matrix(sqrt(Lambda),p,p,byrow=TRUE)
+knitr::kable(D,format="latex", 
+             caption = "Variables",digits = 2)
+```
+
+
+it is often better to present the projection of the normalized initial variables. It suffices to divide every line in the previous table by the corresponding norm of the variables $$\|\boldsymbol x^j\|^2=\frac{1}{9}\sum_{i=1}^9 (x^j_i)^2.$$
+
+The $\|\boldsymbol x^j\|$ actually correspond to the standard deviations of the variables.   We obtain respectively
+$\sigma_j=3.37, 2.99, 3.47, 2.81$ and $2.94$ 
+
+```{r}
+F<- D / sqrt((1/n*colSums(X^2)))
+knitr::kable(F,format="latex", 
+             caption = "Normalized variables",digits = 2)
+```
+
+
+## Applied analysis using our previous function or `factoextra`
+
+We import our favorite package,
+
+```{r}
+library(factoextra)
+```
+using our function, let's see how much weight gains each component
+
+```{r fig.align="center"}
+factox <- facto_pca(dataX)
+fviz_eig(factox$pca, ,addlabels = TRUE)
+```
+Indeed we need only 3 components to describe the data. The contribution of the 1st is 57,6% of the variance, second 22,7% and third 19,7%. Let us plot 2-projections for these components. That might for instance tell us about trends or whether any individuals are "similar" (look at the legend)
+
+```{r fig.align="center"}
+fviz_pca_ind(factox$pca,
+             col.ind = "cos2", 
+            # Coloring time -- color depends on the quality of representation
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE     # Avoid text overlapping albeit names in French are okay
+             )
+```
+or if neccesary "higher order components"
+
+```{r fig.align="center"}
+plot(factox$pca,choix="ind",axes=2:3)
+```
+
+Since it's a complete mess (here we have 9 individuals but what if we had 90000000? Could you easily detect multidimensional trends just by projections to 2-axis systems?) let's take another figure, more informative this time (take 3 seconds to realize the significance of arrows pointing to the same side of the circle and to opposite direction before reading the following paragraph)
+
+```{r fig.align="center"}
+fviz_pca_var(factox$pca,
+             col.var = "contrib", 
+             # Color by contributions to the PC
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE # as before
+             )
+```
+
+This plot is also known as «variable correlation plot». It shows the relationships between all variables. It can be interpreted as follow:
+
+* Positively correlated variables are grouped together.
+
+* Negatively correlated variables are positioned on opposite sides of the plot origin (opposed quadrants).
+
+* The distance between variables and the origin measures the quality of the variables on the factor map. Variables that are away from the origin are well represented on the factor map.
+
+Let us also elaborate on the colors
+
+## ** "Bonus": $\cos^2$ "quality"**
+How do we now that a component $C_j$ represents very well a variable? We use the $\cos^2$ score, 
+
+Note that,
+
+* Higher is the $\cos^2$ score better is the indication for a good representation of the variable on the principal component. In this case the variable is positioned close to the circumference of the correlation circle.
+
+* Of course if the $\cos^2$ is horrendous, it's a good hint for us that the variable is not perfectly represented by the PCs. In this case the variable is close to the center of the circle and we may profit from taking a model with more components.
+
+We can have a similar map for the 2nd vs 3rd components even without the colors
+
+```{r fig.align="center"}
+plot(factox$pca,choix="varcor",axes=2:3)
+```
+
+Last but not least, the contributions can be shown also in the form of tables
+
+```{r fig.align="center"}
+knitr::kable(factox$pca$ind$cos2,format="latex",
+caption = "Relative contribution of the axes to individus",
+digits = 2)
+```
+
+and 
+
+```{r}
+knitr::kable(factox$pca$var$contrib,format="latex",
+caption = "Relative contribution of individus to the axes",
+digits = 2)
+```
+
+or in the form of informative plots
+
+```{r fig.align="center"}
+fviz_contrib(factox$pca, choice = "ind", axes = 1)
+```
+
+and 
+
+```{r fig.align="center"}
+library("corrplot")
+corrplot(factox$pca$var$cos2, is.corr=FALSE)
+```
+
+We can repeat the same code but using the command `prcomp`:
+
+```{r fig.align="center"}
+prcompx <- prcomp(dataX, scale=TRUE)
+fviz_eig(prcompx,addlabels = TRUE)
+```
+
+That might change the results that we obtain (couldn't see this in previous figure, so be careful). For instance, the correlation between variables is now different
+
+```{r fig.align="center"}
+fviz_pca_var(prcompx,
+             col.var = "contrib", 
+             # Color by contributions to the PC
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE # as before
+             )
+```
+
+The contributions of individuals to components however stays more or less the same
+
+```{r fig.align="center"}
+pr.var <- get_pca_var(prcompx)
+corrplot(pr.var$cos2, is.corr=FALSE)
+```
+
+# Solution 2 -- analysis of «Crabs», a dataset with a side-effect
+
+## 0. Loading the data
+```{r}
+library(MASS)
+data(crabs)
+n=dim(crabs)[1]
+```
+
+We just need the quantitative columns though,
+
+```{r}
+crabsquant<-crabs[,4:8]
+```
+
+### 0.5 Visualisation of the correlations
+Recall the correlations between these columns
+
+```{r}
+cor(crabsquant)
+```
+
+represented by the figure
+
+```{r}
+pairs(crabsquant,col=c("blue","orange")[crabs$sp],pch=c(21,20)[crabs$sex])
+```
+
+## 1. Bruteforce PCA
+
+For this exercise we use the command `princomp`. Its output (by `str(princomp(...))`) is divided to several parts, 
+
+  - [sdev] standard deviation of the principal components, that is the square root of the eigenvalues.
+  -  [loadings] The matrix of eigenvectors (i.e., of principal axes).
+  -  [center] Averages used for centering of the data.
+  -  [scale] Standard deviations used for data reduction.
+  -  [n.obs] Number of observations.
+  -  [scores] Principal components.
+  -  [call] Reminder to the call of the command `princomp``.
+
+
+Let's examine the output from `princomp`
+
+```{r}
+res <- princomp(scale(crabsquant))
+```
+
+The first axis captures most of the variation of our cluster, while the others are basically negligible.
+We observe this phenomenon by taking a look at the eigenvalues: The first component captures 95\% of the inertia!
+
+```{r}
+summary(res)
+```
+
+The individuals+variables plot is not giving us any more insights
+
+```{r fig.align="center"}
+biplot(res)
+```
+
+This is somewhat expected and is due to the (very visible) side-effect. In other words, if you look in the correlations  figure above you see that almost all variables are very (positively) correlated so we cannot study anything neither on the dataset nor on the distribution of species.
+
+```{r fig.align="center"}
+plot(res$scores[,1:2],col=c("blue","orange")[crabs$sp],pch=c(21,20)[crabs$sex])
+abline(h=0,v=0,col="red")
+```
+
+As we did last time we considered the dataset (look at our solutions to k-means exercises) we will have to erase the side effect. For that purpose we just have to look at the next components
+
+```{r}
+# Corrélations variables-facteurs principaux
+rho2 <- res$loadings[,2] * res$sdev[2]
+rho3 <- res$loadings[,3] * res$sdev[3]
+corr <- cbind(rho2,rho3)
+print(corr,digits=2)
+
+plot(res$scores[,2:3],col=c("blue","orange")[crabs$sp],pch=c(21,20)[crabs$sex])
+abline(h=0,v=0,col="blue")
+#plot(c(-1,1),c(-1,1),type="none")
+arrows(0,0,rho2,rho3, xlim=c(-1,1), ylim=c(-1,1), type = "n",length=0.1)
+abline(h=0,v=0)
+text(rho2,rho3, labels=names(crabsquant), cex=1)
+symbols(0,0,circles=1,inches= F, add=T)
+```
+
+We see clearly that the variable `RW` separates male from female crabs and that the blue crabs are a bit larger and have longer carapace (the variables `CW` and `CL` are both large) while orange crabs have a smaller, thicker carapace (`CW` and `CL` small). That is one option, but maybe it is "not so wise" throwing to the trash 95% of the data. Let's see the other option,
+
+
+## 2. PCA performed after transormation deleting the side-effect
+
+### Reminder: data transformation (normalization)
+
+As before, we normalize the dataset (thus removing the side-effect). The normalization is done by dividing in the variable which is most correlated with the others (look at the table above), in this case the 3rd one.
+
+```{r}
+crabsquant2<-(crabsquant/crabsquant[,3])[,-3]
+```
+
+Let's just rename the columns so we don't get confused
+
+```{r}
+j=0
+for(i in c(1,2,4,5)) 
+{
+ j=j+1
+ names(crabsquant2)[j]<-c(paste(names(crabsquant)[i],"/",names(crabsquant[3])))
+}
+```
+
+We can visualize the correlations between the new normalized variables,
+
+```{r}
+pairs(crabsquant2,col=c("blue","orange")[crabs$sp],pch=c(21,20)[crabs$sex])
+```
+
+We are now ready to perform the PCA "ritual" all over,
+
+```{r}
+res<-princomp(scale(crabsquant2))
+par(mfrow=c(1,2))
+plot(res)
+```
+
+
+## 3. Analysis of the output
+
+Let us understand the PCA in two steps. First just look a the output
+
+```{r}
+str(res)
+```
+
+### Choice of axes
+
+```{r}
+summary(res)
+```
+
+Here we keep the first two axes, which both carry a
+variance greater than the mean (1). In total, the "portion" of the two
+first factors will account for 85% of the total variance.
+
+This time, this analysis manages to distinguish very well between species and
+sexes. Axis 1 separates the 2 species, while axis 2 separates the
+females of males.
+
+```{r}
+plot(res$scores[,1:2],col=c("blue","orange")[crabs$sp],pch=c(18,20)[crabs$sex])
+```
+
+## 4. Analysis of variables: construction of the circle of correlations
+That means we need only 2 axes, so let's build the associated circle of correlations with correlations $\rho_1,\rho_2$
+
+```{r}
+# Corrélations variables-facteurs principaux
+rho1 <- res$loadings[,1] * res$sdev[1]
+rho2 <- res$loadings[,2] * res$sdev[2]
+corr <- cbind(rho1,rho2)
+print(corr,digits=2)
+```
+
+We are thus ready to plot the correlations
+
+```{r}
+# Affichage du cercle des corrélations
+plot(res$scores[,1:2],col=c("blue","orange")[crabs$sp],pch=c(21,20)[crabs$sex])
+arrows(0,0,rho1,rho2, xlim=c(-1,1), ylim=c(-1,1), type = "n",length=0.1)
+abline(h=0,v=0)
+text(rho1,rho2, labels=names(crabsquant2), cex=1)
+symbols(0,0,circles=1,inches= F, add=T)
+```
+
+The first axis is positively correlated with the $\frac{BD}{CL}$ and $\frac{FL}{CL}$ variables but
+negatively with $\frac{CW}{CL}$. The second axis is mainly
+(negatively) correlated with $\frac{RW}{CL}$.
+
+```{r}
+# Carrés des corrélations (cosinus carrés)
+print(corr^2,digits=2)
+
+# Cumul des carrés des corrélations
+print(t(apply(corr^2,1,cumsum)),digits=2)
+```
+
+
+### 5. Analysis of individuals
+Let's look at the following two self-explanatory tables telling us details on individuals which contribute "the most" to each of the two axes,
+
+```{r}
+ctrb <- NULL
+for (k in 1:2){
+  ctrb <- cbind( ctrb,res$scores[,k]^2/res$sdev[k]^2/nrow(crabs))
+}
+o1 <-order(ctrb[,1],decreasing=T)
+o2 <-order(ctrb[,2],decreasing=T)
+best1 <- cbind(ctrb[o1,1],res$scores[o1,1],crabs$sp[o1],crabs$sex[o1])
+best2 <- cbind(ctrb[o2,2],res$scores[o2,2],crabs$sp[o2],crabs$sex[o2])
+print(best1[1:10,])
+print(best2[1:10,])
+```
+
+As a matter of fact, we get that both axes are influenced mainly by blue females. Actually if we look at the first 100 influential individuals in each axis we see there are more of them on each axis
+
+```{r}
+library(tidyr)
+library(tidyverse)
+library(ggplot2)
+sex_species_fst <- as.data.frame(best1[1:100,3:4])
+sex_sepcies_fst <- sex_species_fst %>% 
+  rename(
+    Sex = V1,
+    Species = V2
+  )
+ggplot(gather(sex_sepcies_fst), aes(value)) + 
+    geom_histogram(bins = 100) + 
+    facet_wrap(~key, scales = 'free_x')
+```
+
+and for the second one,
+
+```{r}
+library(tidyr)
+library(tidyverse)
+library(ggplot2)
+sex_species_snd <- as.data.frame(best2[1:100,3:4])
+sex_sepcies_snd <- sex_species_fst %>% 
+  rename(
+    Sex = V1,
+    Species = V2
+  )
+ggplot(gather(sex_sepcies_snd), aes(value)) + 
+    geom_histogram(bins = 100) + 
+    facet_wrap(~key, scales = 'free_x')
+```
+
+# Solution 3 - Phylogeny of Globins
+
+## Download of the dataset
+
+First let us get the data. Since we fetch something from dropbox I pass through `GET` (see Dropbox documentation; https://www.dropbox.com/help/201) the parameter `raw=1`
+
+```{r}
+globins <- read.table("https://www.dropbox.com/s/e2hsa9tx3ew60pf/neighbor_globin.txt?dl=0&raw=1")
+titles <- read.table("https://www.dropbox.com/s/29kxzrk8bd64d2b/Globines_liste.txt?dl=0&raw=1",
+                     sep="\n")
+#d <- read.table("neighbor_globin.txt",header = FALSE,row.names=1)
+#colnames(d) <- rownames(d)
+```
+
+## Merge the titles and the globins dataset
+Self-explanatory 
+
+```{r}
+quant_globins <- globins[,-1]
+rownames(quant_globins) <- globins[,1]
+for(idx in seq(1,nrow(titles))) {
+  colnames(quant_globins)[idx] <- toString(titles[idx,'V1'])
+}
+```
+
+## Checking correctness of inout
+To be a dissimilarities matrix we demand the dataframe is 
+
+1. symmetric
+
+```{r}
+mat_goblins <- data.matrix(quant_globins)
+colnames(mat_goblins) <- NULL
+rownames(mat_goblins) <- NULL
+isSymmetric(mat_goblins)
+```
+
+2. Zero on diagonal
+
+```{r}
+diagelms <- diag(mat_goblins)
+is_zero_on_diag <- TRUE
+for(idx in seq(1,ncol(mat_goblins))){
+  if(diagelms[idx] != 0) {
+    is_zero_on_diag = FALSE
+  }
+}
+is_zero_on_diag
+```
+
+3. Its entries are positive
+
+```{r}
+is_positive = TRUE
+for(idx in seq(1,nrow(mat_goblins))) {
+  for(jdx in seq(idx, ncol(mat_goblins))) {
+    if(mat_goblins[idx,jdx] < 0) {
+      is_positive = FALSE
+    }
+  }
+}
+```
+
+### Square the data
+```{r}
+Delta <- sapply(quant_globins, function(x) x^2)
+```
+
+### Compute the centering matrix ,J, and B
+```{r}
+n <- nrow(quant_globins)
+J <- diag(n) - 1 / n * matrix(1,n,n)
+B <- -  1 / 2 * J %*% Delta %*% J
+```
+
+As the name hints the matrix $J$ centers the data. Multiplying by it from the left is like centering each row (subtracting from each column its mean) and from the right like centering each column (subtracting from each row its mean). Then $B$ is the bi-centering of the square dissimilarities (or as you've seen in the class $B=X'X$ for $X$ being the initial globin samples).
+
+## The spectral decomposition of $B$
+
+```{r}
+Lambda <- eigen(B)$values
+U <- eigen(B)$vectors
+```
+
+Let's see which components we keep and which we throw away (by the way, note that the spectrum of $B$ in our case is simple),
+
+```{r}
+library(FactoMineR)
+pcaB <- PCA(B, graph = FALSE)
+fviz_eig(pcaB, addlabels = TRUE)
+```
+
+We see that 98.3% of the data can be represented as lying in the subspace generated by the first 3 components. The corresponding eigenvalues are 
+
+```{r}
+Lambda[1:3]
+```
+
+all of which are bigger than 1, of multiplicity 1 (=simple) and it means we obtain our data is in a filled 2D ellipsoid with central axes of these lengths. Usually we use either the scree test above or the magnitude of the eigenvalues. In fancy words
+
+> "Those with eigenvalues less than 1.00 are not considered to be stable. They account for less variability than does a single variable and are not retained in the analysis. In this sense, you end up with fewer factors than original number of variables."
+> (Girden, E. R. (2001). Evaluating research articles from start to finish. Thousand Oaks, Calif., Sage Publications.)
+
+The spanning eigenvectors (=principal components in this case) are 
+
+```{r}
+B %*% U[,1:3]
+```
+
+(albeit if you wish to find all PC just type `U`). 
+
+## Plots of compoennts
+We first associate to each row in $\Delta$ a quadrinary type of globin and species. For type we have 
+
+* 1 -- myoglobin
+* 2 -- hemoglobin $\beta$
+* 3 -- hemoglobin $\alpha$
+* 4 -- Globin-3
+
+```{r}
+n <- nrow(quant_globins)
+globin_types <- matrix(0,n,1)
+for(idx in seq(1,n)){
+  if(grepl("Myoglobin", toString(colnames(quant_globins)[idx]))){
+    globin_types[idx] = 1
+  }
+  if(grepl("Hemoglobin beta", toString(colnames(quant_globins)[idx]))){
+    globin_types[idx] = 2
+  }
+  if(grepl("Hemoglobin alpha", toString(colnames(quant_globins)[idx]))){
+    globin_types[idx] = 3
+  }
+  if(grepl("Globin-3", toString(colnames(quant_globins)[idx]))){
+    globin_types[idx] = 4
+  }
+}
+```
+
+and for species
+
+* 1 -- bird
+* 2 -- sperm whale
+* 3 -- primate
+* 4 -- myxine
+* 5 -- rodent
+* 6 -- crocodile
+* 7 -- squamate (scaled reptile)
+* 8 -- turtle
+
+```{r}
+# The data here is already sorted so I spared our time doing for-loops/cases/ifs
+globin_species <- c(
+  rep(1,3),
+  rep(2,3),
+  rep(3,3),
+  rep(4,1),
+  rep(5,3),
+  rep(6,3),
+  rep(7,2),
+  rep(8,3)
+)
+```
+
+now that we gathered all the necessary data we can have our plots
+
+```{r fig.align="center"}
+comps <- B %*% U[,1:2]
+colnames(comps) <- c("Comp 1", "comp 2")
+plot(comps,pch=c(seq(5,12))[globin_species],col=c("blue","orange","darkgreen","red")[globin_types])
+```
+
+
+and
+
+```{r fig.align="center"}
+seccomps <- B %*% U[,2:3]
+colnames(seccomps) <- c("Comp 2", "comp 3")
+plot(seccomps,pch=c(seq(5,12))[globin_species],col=c("blue","orange","darkgreen","red")[globin_types])
+```
+
+The figures confirm the distances in the phylogenetic tree -- there are 3 clusters with many colors. We understand there are animals which are closer to each other in terms of globins, that most animals globins are closer to each other and we can indeed verify that globins which are far on the tree will also be far on the figure.
+
+Now please look at the figures in which we present only one "type" of globin and see what can be said. Verify that animals closer on the tree are also close in terms of markers in the figure and vice versa.
+
+```{r fig.align="center"}
+#hemo
+comps <- B %*% U[,1:2]
+comps <- comps[globin_types == 1,]
+gl_sp1 <- globin_species[globin_types == 1]
+colnames(comps) <- c("Comp 1", "comp 2")
+plot(comps,pch=c(seq(5,12))[gl_sp1],col=c("blue"))
+# beta
+comps <- B %*% U[,1:2]
+comps <- comps[globin_types == 2,]
+gl_sp2 <- globin_species[globin_types == 2]
+colnames(comps) <- c("Comp 1", "comp 2")
+plot(comps,pch=c(seq(5,12))[gl_sp2],col=c("orange"))
+# alpha
+comps <- B %*% U[,1:2]
+comps <- comps[globin_types == 3,]
+gl_sp3 <- globin_species[globin_types == 3]
+colnames(comps) <- c("Comp 1", "comp 2")
+plot(comps,pch=c(seq(5,12))[gl_sp3],col=c("darkgreen"))
+# Myo-3
+comps <- B %*% U[,1:2]
+comps <- comps[globin_types == 4,]
+gl_sp4 <- globin_species[globin_types == 4]
+plot(comps,pch=c(seq(5,12))[gl_sp4],col=c("red"))
+```
+
+
+## Principal coordinate analysis
+We can now repeat the analysis replacing the former PCA by coordinate analysis:
+```{r fig.align='center'}
+afp <- cmdscale(data.matrix(quant_globins), k=4, eig=TRUE)
+pch.type <- c(rep(1,6),rep(2,7), rep(3,7),4)
+colors <- c(1:6,4,7,8,1:3,5,4,7,5,1:3,8,9)
+plot(afp$points,pch=pch.type,col = rainbow(9)[colors])
+legend("topleft",legend=c("Myoglobin","Hemoglobin Beta","Hemoglobin Alpha","Globin-3"), pch=1:4)
+plot(afp$points[,3:4],pch=pch.type,col = rainbow(9)[colors])
+legend("topright",legend=c("Myoglobin","Hemoglobin Beta","Hemoglobin Alpha","Globin-3"), pch=1:4)
+
+
+myg <- quant_globins[1:6,1:6]
+beta <- quant_globins[7:13,7:13]
+alpha <- quant_globins[14:20,14:20]
+
+afp.myg <- cmdscale(as.matrix(myg), k=4, eig=TRUE)
+colors <- c(1:6)
+#pdf("AFP_myg.pdf")
+plot(afp.myg$points,pch=1,col = rainbow(9)[colors])
+legend("top",legend=c("Cachalot","Homme","Souris","Poulet","Alligator","Tortue"),
+       pch=1,col=rainbow(9)[1:6])
+plot(afp.myg$points[,3:4],pch=1,col = rainbow(9)[colors])
+legend("bottomleft",legend=c("Cachalot","Homme","Souris","Poulet","Alligator","Tortue"),
+       pch=1,col=rainbow(9)[1:6])
+#dev.off()
+
+afp.beta <- cmdscale(as.matrix(beta), k=4, eig=TRUE)
+colors <- c(4,7,8,1:3,5)
+#pdf("AFP_beta.pdf")
+plot(afp.beta$points
+     ,pch=2,col = rainbow(9)[colors])
+legend("bottomleft",legend=c("Cachalot","Homme","Souris","Poulet","Alligator","Tortue","Iguane"), pch=2,col=rainbow(9)[c(1:5,7,8)])
+plot(afp.beta$points[,3:4],pch=2,col = rainbow(9)[colors])
+legend("topright",legend=c("Cachalot","Homme","Souris","Poulet","Alligator","Tortue","Iguane"),
+       pch=2,col=rainbow(9)[c(1:5,7,8)])
+#dev.off()
+
+afp.alpha <- cmdscale(as.matrix(alpha), k=4, eig=TRUE)
+colors <- c(4,7,5,1:3,8)
+#pdf("AFP_alpha.pdf")
+plot(afp.alpha$points,pch=3,col = rainbow(9)[colors])
+legend("topright",legend=c("Cachalot","Homme","Souris","Poulet","Alligator","Tortue","Iguane"),
+       pch=3, col=rainbow(9)[c(1:5,7,8)])
+plot(afp.alpha$points[,3:4],pch=3,col = rainbow(9)[colors])
+legend("topright",legend=c("Cachalot","Homme","Souris","Poulet","Alligator","Tortue","Iguane"),
+       pch=3,col=rainbow(9)[c(1:5,7,8)])
+#dev.off()
+```
